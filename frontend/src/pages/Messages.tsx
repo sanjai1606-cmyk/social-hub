@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { ConversationPreview, Message } from '../types';
 import { messagesAPI, usersAPI } from '../api';
 import { supabase } from '../lib/supabase';
@@ -27,10 +28,32 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { userId } = useAuthStore();
+  const location = useLocation();
 
   useEffect(() => {
     loadConversations();
   }, []);
+
+  // Auto-open chat if navigated here with startChatWith state
+  useEffect(() => {
+    const startChatWith = location.state?.startChatWith as string | undefined;
+    if (startChatWith) {
+      usersAPI.getUser(startChatWith).then((res) => {
+        const u = res.data;
+        const convo: ConversationPreview = {
+          user_id: u.user_id,
+          username: u.username,
+          display_name: u.display_name,
+          avatar_url: u.avatar_url,
+          last_message: '',
+          last_message_at: '',
+          unread_count: 0,
+        };
+        setActiveChat(convo);
+        messagesAPI.getMessages(u.user_id).then((r) => setMessages(r.data)).catch(() => {});
+      }).catch(() => {});
+    }
+  }, [location.state]);
 
   // Real-time messages
   useEffect(() => {
@@ -40,14 +63,9 @@ export default function MessagesPage() {
       .channel('messages')
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const msg = payload.new as any;
-          // If message is in active chat
           if (
             activeChat &&
             ((msg.sender_id === activeChat.user_id && msg.receiver_id === userId) ||
@@ -68,7 +86,6 @@ export default function MessagesPage() {
               },
             ]);
           }
-          // Refresh conversation list
           loadConversations();
         }
       )
@@ -117,13 +134,14 @@ export default function MessagesPage() {
     }
   };
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
+  const handleSearch = async (q: string) => {
+    setSearchQuery(q);
+    if (!q.trim()) {
       setSearchResults([]);
       return;
     }
     try {
-      const res = await usersAPI.searchUsers(searchQuery);
+      const res = await usersAPI.searchUsers(q);
       setSearchResults(res.data);
     } catch {
       // ignore
@@ -158,10 +176,7 @@ export default function MessagesPage() {
               className="input"
               placeholder="Search users..."
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                handleSearch();
-              }}
+              onChange={(e) => handleSearch(e.target.value)}
             />
           </div>
         </div>

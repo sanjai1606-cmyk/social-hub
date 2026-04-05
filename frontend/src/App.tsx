@@ -8,6 +8,7 @@ import FeedPage from './pages/Feed';
 import ProfilePage from './pages/Profile';
 import MessagesPage from './pages/Messages';
 import ExplorePage from './pages/Explore';
+import ConnectionsPage from './pages/Connections';
 import { HiOutlineBars3 } from 'react-icons/hi2';
 import './index.css';
 
@@ -68,6 +69,7 @@ export default function App() {
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/profile/:userId" element={<ProfilePage />} />
           <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/connections" element={<ConnectionsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

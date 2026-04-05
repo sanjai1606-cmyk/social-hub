@@ -8,6 +8,7 @@ import {
   HiOutlineChatBubbleLeftRight,
   HiOutlineUser,
   HiOutlineArrowRightOnRectangle,
+  HiOutlineUserGroup,
 } from 'react-icons/hi2';
 
 interface SidebarProps {
@@ -28,6 +29,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     { path: '/', icon: <HiOutlineHome size={22} />, label: 'Feed' },
     { path: '/explore', icon: <HiOutlineMagnifyingGlass size={22} />, label: 'Explore' },
     { path: '/messages', icon: <HiOutlineChatBubbleLeftRight size={22} />, label: 'Messages' },
+    { path: '/connections', icon: <HiOutlineUserGroup size={22} />, label: 'Connections' },
     { path: `/profile/${userId}`, icon: <HiOutlineUser size={22} />, label: 'Profile' },
   ];
 

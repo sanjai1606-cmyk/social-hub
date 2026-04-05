@@ -1,4 +1,5 @@
 import os
+import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -7,32 +8,59 @@ load_dotenv()
 
 security = HTTPBearer()
 
-# Still exported so posts.py optional-auth can fall back to it if needed
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
+# Kept so posts.py can import it (used as a sentinel for optional auth)
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
     """
-    Verify a Supabase Auth JWT by calling auth.get_user().
+    Verify a Supabase Auth JWT by calling the /auth/v1/user endpoint directly.
     Works with both legacy HS256 and the current ECC (P-256 / ES256) signing keys.
-    No JWT secret is required on the server side.
+    No local JWT decoding — Supabase verifies the token server-side.
     """
-    # Import here to avoid circular imports (database imports dotenv too)
-    from database import supabase
-
     token = credentials.credentials
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No token provided"
+        )
+
     try:
-        response = supabase.auth.get_user(token)
-        if not response.user:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+
+        if response.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token"
             )
+
+        user_data = response.json()
+        user_id = user_data.get("id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: no user ID"
+            )
+
         return {
-            "user_id": response.user.id,
-            "email": response.user.email or "",
-            "role": response.user.role or "",
+            "user_id": user_id,
+            "email": user_data.get("email", ""),
+            "role": user_data.get("role", ""),
         }
+
     except HTTPException:
         raise
     except Exception:

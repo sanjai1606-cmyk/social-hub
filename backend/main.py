@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, posts, users, social
+from routers import auth, posts, users, social, uploads, connections
 
 app = FastAPI(
     title="Social Media Mini Platform API",
@@ -24,6 +24,8 @@ app.include_router(auth.router)
 app.include_router(posts.router)
 app.include_router(users.router)
 app.include_router(social.router)
+app.include_router(uploads.router)
+app.include_router(connections.router)
 
 
 @app.get("/")

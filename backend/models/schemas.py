@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -34,6 +34,7 @@ class UserProfile(BaseModel):
     follower_count: int = 0
     following_count: int = 0
     post_count: int = 0
+    connection_count: int = 0
     is_following: bool = False
 
 class UpdateProfileRequest(BaseModel):
@@ -125,3 +126,22 @@ class NotificationResponse(BaseModel):
     actor_username: str = ""
     actor_display_name: str = ""
     actor_avatar_url: str = ""
+
+
+# ── Connections ───────────────────────────────────────
+class ConnectionUserMini(BaseModel):
+    user_id: str
+    username: str
+    display_name: str
+    avatar_url: str = ""
+    bio: str = ""
+
+class ConnectionStatus(BaseModel):
+    status: str  # none | pending_sent | pending_received | connected | self
+    connection_id: Optional[str] = None
+
+class ConnectionResponse(BaseModel):
+    connection_id: str
+    user: ConnectionUserMini
+    status: str  # accepted | pending_sent | pending_received
+    created_at: str

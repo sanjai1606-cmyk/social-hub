@@ -153,12 +153,17 @@ async def get_user_profile(user_id: str, viewer_id: str) -> UserProfile:
 
 
 async def _build_profile(user_data: dict, viewer_id: str) -> UserProfile:
-    """Build UserProfile with follower/following/post counts and is_following."""
+    """Build UserProfile with follower/following/post/connection counts and is_following."""
     uid = user_data["user_id"]
 
     followers = supabase.table("follows").select("follower_id", count="exact").eq("followee_id", uid).execute()
     following = supabase.table("follows").select("followee_id", count="exact").eq("follower_id", uid).execute()
     posts = supabase.table("posts").select("post_id", count="exact").eq("user_id", uid).execute()
+
+    # Connection count (accepted connections from either direction)
+    conn_as_req = supabase.table("connections").select("connection_id", count="exact").eq("requester_id", uid).eq("status", "accepted").execute()
+    conn_as_addr = supabase.table("connections").select("connection_id", count="exact").eq("addressee_id", uid).eq("status", "accepted").execute()
+    connection_count = (conn_as_req.count or 0) + (conn_as_addr.count or 0)
 
     is_following = False
     if viewer_id and viewer_id != uid:
@@ -175,5 +180,6 @@ async def _build_profile(user_data: dict, viewer_id: str) -> UserProfile:
         follower_count=followers.count or 0,
         following_count=following.count or 0,
         post_count=posts.count or 0,
+        connection_count=connection_count,
         is_following=is_following,
     )
