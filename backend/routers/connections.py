@@ -21,9 +21,9 @@ def _get_connection(user_a: str, user_b: str) -> Optional[dict]:
 def _build_profile(user_data: dict) -> dict:
     """Build a minimal user dict for connection responses."""
     return {
-        "user_id": user_data["user_id"],
-        "username": user_data.get("username", ""),
-        "display_name": user_data.get("display_name", ""),
+        "user_id": user_data.get("user_id", ""),
+        "username": user_data.get("username", "Unknown User"),
+        "display_name": user_data.get("display_name", "Unknown User"),
         "avatar_url": user_data.get("avatar_url", ""),
         "bio": user_data.get("bio", ""),
     }
@@ -175,7 +175,9 @@ async def get_my_connections(current_user: dict = Depends(get_current_user)):
         connections = []
         for row in result.data:
             pid = row["addressee_id"] if row["requester_id"] == me else row["requester_id"]
-            u = user_map.get(pid, {})
+            u = user_map.get(pid)
+            if not u:
+                continue
             connections.append(ConnectionResponse(
                 connection_id=row["connection_id"],
                 user=_build_profile(u),
@@ -184,7 +186,8 @@ async def get_my_connections(current_user: dict = Depends(get_current_user)):
             ))
         return connections
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching connections: {str(e)}")
+        return []
 
 
 @router.get("/requests/received", response_model=List[ConnectionResponse])
@@ -206,14 +209,15 @@ async def get_received_requests(current_user: dict = Depends(get_current_user)):
         return [
             ConnectionResponse(
                 connection_id=row["connection_id"],
-                user=_build_profile(user_map.get(row["requester_id"], {})),
+                user=_build_profile(user_map[row["requester_id"]]),
                 status="pending_received",
                 created_at=row["created_at"],
             )
-            for row in result.data
+            for row in result.data if row["requester_id"] in user_map
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching received requests: {str(e)}")
+        return []
 
 
 @router.get("/requests/sent", response_model=List[ConnectionResponse])
@@ -235,11 +239,12 @@ async def get_sent_requests(current_user: dict = Depends(get_current_user)):
         return [
             ConnectionResponse(
                 connection_id=row["connection_id"],
-                user=_build_profile(user_map.get(row["addressee_id"], {})),
+                user=_build_profile(user_map[row["addressee_id"]]),
                 status="pending_sent",
                 created_at=row["created_at"],
             )
-            for row in result.data
+            for row in result.data if row["addressee_id"] in user_map
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching sent requests: {str(e)}")
+        return []
