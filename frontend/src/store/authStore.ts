@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from '../lib/supabase';
 
 interface AuthState {
   token: string | null;
@@ -28,7 +29,12 @@ export const useAuthStore = create<AuthState>()(
       displayName: null,
       avatarUrl: null,
       isAuthenticated: false,
-      login: (data) =>
+      login: (data) => {
+        // Set session on the Supabase JS client so Storage RLS policies work
+        supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: '',
+        });
         set({
           token: data.access_token,
           userId: data.user_id,
@@ -36,7 +42,8 @@ export const useAuthStore = create<AuthState>()(
           displayName: data.display_name,
           avatarUrl: data.avatar_url || null,
           isAuthenticated: true,
-        }),
+        });
+      },
       logout: () =>
         set({
           token: null,

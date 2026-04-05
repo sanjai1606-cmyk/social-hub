@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List, Optional
 from models.schemas import PostResponse, CreatePostRequest
 from database import supabase
@@ -6,16 +7,47 @@ from middleware.auth import get_current_user
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
+# Optional auth bearer — returns None instead of raising 401 when no token
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def _get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_optional_bearer),
+) -> Optional[dict]:
+    """Verify token via Supabase auth.get_user() if present; return None if missing or invalid."""
+    if not credentials:
+        return None
+    try:
+        response = supabase.auth.get_user(credentials.credentials)
+        if not response.user:
+            return None
+        return {"user_id": response.user.id}
+    except Exception:
+        return None
+
+
+def _check_liked(post_id: str, user_id: str) -> bool:
+    """Return True if user has liked the given post."""
+    result = supabase.table("likes").select("like_id").eq("post_id", post_id).eq("user_id", user_id).execute()
+    return len(result.data) > 0
+
 
 @router.get("", response_model=List[PostResponse])
 async def get_posts(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    current_user: Optional[dict] = Depends(_get_optional_user),
 ):
-    """Get posts (optionally filtered by user). Public endpoint."""
+    """Get posts (optionally filtered by user). Public endpoint; returns is_liked when authenticated."""
     try:
-        query = supabase.table("v_post_summary").select("*").order("created_at", desc=True).limit(limit).offset(offset)
+        query = (
+            supabase.table("v_post_summary")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .offset(offset)
+        )
 
         if user_id:
             query = query.eq("user_id", user_id)
@@ -24,19 +56,23 @@ async def get_posts(
 
         posts = []
         for row in result.data:
-            posts.append(PostResponse(
-                post_id=row["post_id"],
-                user_id=row["user_id"],
-                content=row["content"],
-                media_url=row.get("media_url", ""),
-                media_type=row.get("media_type", "none"),
-                created_at=row["created_at"],
-                username=row.get("username", ""),
-                display_name=row.get("display_name", ""),
-                avatar_url=row.get("avatar_url", ""),
-                like_count=row.get("like_count", 0),
-                comment_count=row.get("comment_count", 0),
-            ))
+            is_liked = _check_liked(row["post_id"], current_user["user_id"]) if current_user else False
+            posts.append(
+                PostResponse(
+                    post_id=row["post_id"],
+                    user_id=row["user_id"],
+                    content=row["content"],
+                    media_url=row.get("media_url", ""),
+                    media_type=row.get("media_type", "none"),
+                    created_at=row["created_at"],
+                    username=row.get("username", ""),
+                    display_name=row.get("display_name", ""),
+                    avatar_url=row.get("avatar_url", ""),
+                    like_count=row.get("like_count", 0),
+                    comment_count=row.get("comment_count", 0),
+                    is_liked=is_liked,
+                )
+            )
         return posts
 
     except Exception as e:
@@ -47,35 +83,38 @@ async def get_posts(
 async def get_feed(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """Get personalized feed for the current user."""
     try:
-        result = supabase.rpc("get_user_feed", {
-            "p_user_id": current_user["user_id"],
-            "p_limit": limit,
-            "p_offset": offset
-        }).execute()
+        result = supabase.rpc(
+            "get_user_feed",
+            {
+                "p_user_id": current_user["user_id"],
+                "p_limit": limit,
+                "p_offset": offset,
+            },
+        ).execute()
 
         posts = []
         for row in result.data:
-            # Check if current user liked the post
-            like_check = supabase.table("likes").select("like_id").eq("post_id", row["post_id"]).eq("user_id", current_user["user_id"]).execute()
-
-            posts.append(PostResponse(
-                post_id=row["post_id"],
-                user_id=row["user_id"],
-                content=row["content"],
-                media_url=row.get("media_url", ""),
-                media_type=row.get("media_type", "none"),
-                created_at=row["created_at"],
-                username=row.get("username", ""),
-                display_name=row.get("display_name", ""),
-                avatar_url=row.get("avatar_url", ""),
-                like_count=row.get("like_count", 0),
-                comment_count=row.get("comment_count", 0),
-                is_liked=len(like_check.data) > 0,
-            ))
+            is_liked = _check_liked(row["post_id"], current_user["user_id"])
+            posts.append(
+                PostResponse(
+                    post_id=row["post_id"],
+                    user_id=row["user_id"],
+                    content=row["content"],
+                    media_url=row.get("media_url", ""),
+                    media_type=row.get("media_type", "none"),
+                    created_at=row["created_at"],
+                    username=row.get("username", ""),
+                    display_name=row.get("display_name", ""),
+                    avatar_url=row.get("avatar_url", ""),
+                    like_count=row.get("like_count", 0),
+                    comment_count=row.get("comment_count", 0),
+                    is_liked=is_liked,
+                )
+            )
         return posts
 
     except Exception as e:
@@ -85,7 +124,7 @@ async def get_feed(
 @router.post("", response_model=PostResponse, status_code=201)
 async def create_post(
     req: CreatePostRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """Create a new post."""
     try:
@@ -100,25 +139,25 @@ async def create_post(
         post = result.data[0]
 
         # Handle tags
-        tags = []
+        tags: List[str] = []
         if req.tags:
             for tag_name in req.tags:
                 tag_name = tag_name.lower().strip()
                 if not tag_name:
                     continue
-                # Upsert tag
-                tag_result = supabase.table("tags").upsert(
-                    {"name": tag_name}, on_conflict="name"
-                ).execute()
+                tag_result = supabase.table("tags").upsert({"name": tag_name}, on_conflict="name").execute()
                 tag_id = tag_result.data[0]["tag_id"]
-                supabase.table("post_tags").insert({
-                    "post_id": post["post_id"],
-                    "tag_id": tag_id
-                }).execute()
+                supabase.table("post_tags").insert({"post_id": post["post_id"], "tag_id": tag_id}).execute()
                 tags.append(tag_name)
 
         # Fetch user info
-        user = supabase.table("users").select("username, display_name, avatar_url").eq("user_id", current_user["user_id"]).single().execute()
+        user = (
+            supabase.table("users")
+            .select("username, display_name, avatar_url")
+            .eq("user_id", current_user["user_id"])
+            .single()
+            .execute()
+        )
 
         return PostResponse(
             post_id=post["post_id"],
@@ -140,7 +179,10 @@ async def create_post(
 
 
 @router.get("/{post_id}", response_model=PostResponse)
-async def get_post(post_id: str):
+async def get_post(
+    post_id: str,
+    current_user: Optional[dict] = Depends(_get_optional_user),
+):
     """Get a single post by ID."""
     try:
         result = supabase.table("v_post_summary").select("*").eq("post_id", post_id).single().execute()
@@ -149,6 +191,8 @@ async def get_post(post_id: str):
         # Get tags
         tags_result = supabase.table("post_tags").select("tags(name)").eq("post_id", post_id).execute()
         tags = [t["tags"]["name"] for t in tags_result.data if t.get("tags")]
+
+        is_liked = _check_liked(post_id, current_user["user_id"]) if current_user else False
 
         return PostResponse(
             post_id=row["post_id"],
@@ -162,6 +206,7 @@ async def get_post(post_id: str):
             avatar_url=row.get("avatar_url", ""),
             like_count=row.get("like_count", 0),
             comment_count=row.get("comment_count", 0),
+            is_liked=is_liked,
             tags=tags,
         )
 
@@ -173,7 +218,6 @@ async def get_post(post_id: str):
 async def delete_post(post_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a post (owner only)."""
     try:
-        # Verify ownership
         post = supabase.table("posts").select("user_id").eq("post_id", post_id).single().execute()
         if post.data["user_id"] != current_user["user_id"]:
             raise HTTPException(status_code=403, detail="Not authorized")
