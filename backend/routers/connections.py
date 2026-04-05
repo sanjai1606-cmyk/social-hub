@@ -11,11 +11,15 @@ router = APIRouter(prefix="/connections", tags=["Connections"])
 
 def _get_connection(user_a: str, user_b: str) -> Optional[dict]:
     """Return the connection row between two users regardless of direction, or None."""
-    result = supabase.table("connections").select("*").or_(
-        f"and(requester_id.eq.{user_a},addressee_id.eq.{user_b}),"
-        f"and(requester_id.eq.{user_b},addressee_id.eq.{user_a})"
-    ).execute()
-    return result.data[0] if result.data else None
+    try:
+        result = supabase.table("connections").select("*").or_(
+            f"and(requester_id.eq.{user_a},addressee_id.eq.{user_b}),"
+            f"and(requester_id.eq.{user_b},addressee_id.eq.{user_a})"
+        ).execute()
+        return result.data[0] if result.data else None
+    except Exception as e:
+        print(f"Warning: Could not query connections table: {str(e)}")
+        return None
 
 
 def _build_profile(user_data: dict) -> dict:
@@ -41,7 +45,11 @@ async def get_connection_status(
     if user_id == me:
         return ConnectionStatus(status="self")
 
-    row = _get_connection(me, user_id)
+    try:
+        row = _get_connection(me, user_id)
+    except Exception:
+        return ConnectionStatus(status="none")
+
     if not row:
         return ConnectionStatus(status="none")
 
