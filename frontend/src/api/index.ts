@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { supabase } from '../lib/supabase';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -90,6 +91,28 @@ export const notificationsAPI = {
     api.get('/notifications', { params: { limit, unread_only: unreadOnly } }),
   markAllRead: () => api.put('/notifications/read-all'),
   getUnreadCount: () => api.get('/notifications/unread-count'),
+};
+
+// ── Media Upload (direct to Supabase Storage) ─────────────────
+export const mediaAPI = {
+  /**
+   * Uploads a file directly to Supabase Storage bucket 'post-media'.
+   * Requires the Supabase JS client to have a valid session (set after login).
+   * Returns the public URL of the uploaded file.
+   */
+  uploadPostMedia: async (file: File, userId: string): Promise<string> => {
+    const ext = file.name.split('.').pop() ?? 'bin';
+    const path = `${userId}/${Date.now()}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from('post-media')
+      .upload(path, file, { upsert: false });
+
+    if (error) throw new Error(error.message);
+
+    const { data } = supabase.storage.from('post-media').getPublicUrl(path);
+    return data.publicUrl;
+  },
 };
 
 export default api;
