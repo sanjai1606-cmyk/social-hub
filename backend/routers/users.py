@@ -13,6 +13,23 @@ async def get_current_profile(current_user: dict = Depends(get_current_user)):
     return await get_user_profile(current_user["user_id"], current_user["user_id"])
 
 
+@router.get("/all", response_model=List[UserProfile])
+async def get_all_users(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get all users except the current user (for Discover People)."""
+    try:
+        result = supabase.table("users").select("*").neq(
+            "user_id", current_user["user_id"]
+        ).order("created_at", desc=True).limit(limit).offset(offset).execute()
+
+        return [await _build_profile(u, current_user["user_id"]) for u in result.data]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/search", response_model=List[UserProfile])
 async def search_users(
     q: str = Query(min_length=1),

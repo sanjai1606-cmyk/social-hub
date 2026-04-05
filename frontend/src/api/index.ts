@@ -67,6 +67,8 @@ export const socialAPI = {
 export const usersAPI = {
   getMe: () => api.get('/users/me'),
   getUser: (userId: string) => api.get(`/users/${userId}`),
+  getAllUsers: (limit = 50, offset = 0) =>
+    api.get('/users/all', { params: { limit, offset } }),
   updateProfile: (data: { display_name?: string; bio?: string; avatar_url?: string; cover_url?: string }) =>
     api.put('/users/me', data),
   searchUsers: (query: string) => api.get('/users/search', { params: { q: query } }),
