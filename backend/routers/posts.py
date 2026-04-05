@@ -1,9 +1,10 @@
+import httpx
 from fastapi import APIRouter, HTTPException, Depends, Query, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List, Optional
 from models.schemas import PostResponse, CreatePostRequest
 from database import supabase
-from middleware.auth import get_current_user
+from middleware.auth import get_current_user, SUPABASE_URL, SUPABASE_ANON_KEY
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 
@@ -14,14 +15,22 @@ _optional_bearer = HTTPBearer(auto_error=False)
 async def _get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(_optional_bearer),
 ) -> Optional[dict]:
-    """Verify token via Supabase auth.get_user() if present; return None if missing or invalid."""
-    if not credentials:
+    """Verify token via Supabase Auth API if present; silently return None if missing or invalid."""
+    if not credentials or not credentials.credentials:
         return None
     try:
-        response = supabase.auth.get_user(credentials.credentials)
-        if not response.user:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {credentials.credentials}",
+                },
+            )
+        if response.status_code != 200:
             return None
-        return {"user_id": response.user.id}
+        uid = response.json().get("id")
+        return {"user_id": uid} if uid else None
     except Exception:
         return None
 
@@ -171,6 +180,7 @@ async def create_post(
             avatar_url=user.data.get("avatar_url", ""),
             like_count=0,
             comment_count=0,
+            is_liked=False,
             tags=tags,
         )
 

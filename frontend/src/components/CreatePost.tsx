@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { postsAPI, mediaAPI } from '../api';
+import { postsAPI, uploadsAPI } from '../api';
 import { useAuthStore } from '../store/authStore';
 import Avatar from './Avatar';
 import { HiOutlinePhoto, HiXMark } from 'react-icons/hi2';
@@ -18,7 +18,7 @@ export default function CreatePost({ onPostCreated }: CreatePostProps) {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [mediaError, setMediaError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { displayName, avatarUrl, userId } = useAuthStore();
+  const { displayName, avatarUrl } = useAuthStore();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -55,11 +55,12 @@ export default function CreatePost({ onPostCreated }: CreatePostProps) {
         .filter(Boolean);
 
       let finalMediaUrl = '';
-      if (mediaFile && userId) {
+      if (mediaFile) {
         setUploadingMedia(true);
         try {
-          finalMediaUrl = await mediaAPI.uploadPostMedia(mediaFile, userId);
-        } catch (err) {
+          const result = await uploadsAPI.uploadMedia(mediaFile);
+          finalMediaUrl = result.url;
+        } catch {
           setMediaError('Upload failed. Post will be created without media.');
         } finally {
           setUploadingMedia(false);

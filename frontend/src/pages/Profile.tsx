@@ -1,14 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import type { User, Post } from '../types';
-import { usersAPI, postsAPI } from '../api';
+import { useParams, useNavigate } from 'react-router-dom';
+import type { User, Post, ConnectionStatusResponse } from '../types';
+import { usersAPI, postsAPI, connectionsAPI } from '../api';
 import { useAuthStore } from '../store/authStore';
 import Avatar from '../components/Avatar';
 import PostCard from '../components/PostCard';
+import {
+  HiOutlineChatBubbleLeftRight,
+  HiOutlineUserPlus,
+  HiOutlineUserMinus,
+  HiOutlineClock,
+} from 'react-icons/hi2';
 
 export default function ProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const { userId: currentUserId } = useAuthStore();
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +23,8 @@ export default function ProfilePage() {
   const [editMode, setEditMode] = useState(false);
   const [editBio, setEditBio] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
+  const [connStatus, setConnStatus] = useState<ConnectionStatusResponse | null>(null);
+  const [connLoading, setConnLoading] = useState(false);
 
   const isOwnProfile = userId === currentUserId;
 
@@ -27,11 +36,17 @@ export default function ProfilePage() {
   }, [userId]);
 
   const loadProfile = async () => {
+    setLoading(true);
     try {
       const res = await usersAPI.getUser(userId!);
       setUser(res.data);
       setEditBio(res.data.bio);
       setEditDisplayName(res.data.display_name);
+
+      if (userId !== currentUserId) {
+        const connRes = await connectionsAPI.getStatus(userId!);
+        setConnStatus(connRes.data);
+      }
     } catch {
       // ignore
     } finally {
@@ -54,18 +69,10 @@ export default function ProfilePage() {
     try {
       if (user.is_following) {
         await usersAPI.unfollow(user.user_id);
-        setUser({
-          ...user,
-          is_following: false,
-          follower_count: user.follower_count - 1,
-        });
+        setUser({ ...user, is_following: false, follower_count: user.follower_count - 1 });
       } else {
         await usersAPI.follow(user.user_id);
-        setUser({
-          ...user,
-          is_following: true,
-          follower_count: user.follower_count + 1,
-        });
+        setUser({ ...user, is_following: true, follower_count: user.follower_count + 1 });
       }
     } catch {
       // ignore
@@ -74,23 +81,66 @@ export default function ProfilePage() {
     }
   };
 
+  const handleConnect = async () => {
+    if (!connStatus || connLoading) return;
+    setConnLoading(true);
+    try {
+      if (connStatus.status === 'none') {
+        await connectionsAPI.sendRequest(userId!);
+        setConnStatus({ status: 'pending_sent', connection_id: null });
+      } else if (connStatus.status === 'pending_sent' || connStatus.status === 'connected') {
+        await connectionsAPI.remove(userId!);
+        setConnStatus({ status: 'none', connection_id: null });
+      } else if (connStatus.status === 'pending_received') {
+        await connectionsAPI.accept(userId!);
+        setConnStatus({ status: 'connected', connection_id: null });
+      }
+    } catch {
+      // ignore
+    } finally {
+      setConnLoading(false);
+    }
+  };
+
+  const handleMessage = () => {
+    navigate('/messages', { state: { startChatWith: userId } });
+  };
+
   const handleSaveProfile = async () => {
     try {
-      await usersAPI.updateProfile({
-        display_name: editDisplayName,
-        bio: editBio,
-      });
-      setUser((prev) =>
-        prev ? { ...prev, display_name: editDisplayName, bio: editBio } : null
-      );
+      await usersAPI.updateProfile({ display_name: editDisplayName, bio: editBio });
+      setUser((prev) => prev ? { ...prev, display_name: editDisplayName, bio: editBio } : null);
       setEditMode(false);
     } catch {
       // ignore
     }
   };
 
+  const getConnectLabel = () => {
+    if (!connStatus) return 'Connect';
+    switch (connStatus.status) {
+      case 'connected': return 'Connected';
+      case 'pending_sent': return 'Pending';
+      case 'pending_received': return 'Accept';
+      default: return 'Connect';
+    }
+  };
+
+  const getConnectIcon = () => {
+    if (!connStatus) return <HiOutlineUserPlus size={16} />;
+    switch (connStatus.status) {
+      case 'connected': return <HiOutlineUserMinus size={16} />;
+      case 'pending_sent': return <HiOutlineClock size={16} />;
+      default: return <HiOutlineUserPlus size={16} />;
+    }
+  };
+
   if (loading) return <div className="page-container"><div className="loading-spinner" /></div>;
-  if (!user) return <div className="page-container"><div className="glass-card empty-state"><div className="empty-state-title">User not found</div></div></div>;
+  if (!user) return (
+    <div className="page-container">
+      <div className="glass-card empty-state"><div className="empty-state-title">User not found</div></div>
+    </div>
+  );
 
   return (
     <div className="page-container">
@@ -150,24 +200,52 @@ export default function ProfilePage() {
               <span className="profile-stat-value">{user.following_count}</span>
               <span className="profile-stat-label">Following</span>
             </div>
+            <div className="profile-stat">
+              <span className="profile-stat-value">{user.connection_count}</span>
+              <span className="profile-stat-label">Connections</span>
+            </div>
           </div>
 
           <div className="profile-actions">
             {isOwnProfile ? (
-              <button
-                className="btn btn-secondary"
-                onClick={() => setEditMode(!editMode)}
-              >
+              <button className="btn btn-secondary" onClick={() => setEditMode(!editMode)}>
                 {editMode ? 'Cancel' : 'Edit Profile'}
               </button>
             ) : (
-              <button
-                className={`btn ${user.is_following ? 'btn-secondary' : 'btn-primary'}`}
-                onClick={handleFollow}
-                disabled={followLoading}
-              >
-                {followLoading ? '...' : user.is_following ? 'Following' : 'Follow'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className={`btn btn-sm ${user.is_following ? 'btn-secondary' : 'btn-primary'}`}
+                  onClick={handleFollow}
+                  disabled={followLoading}
+                >
+                  {followLoading ? '...' : user.is_following ? 'Following' : 'Follow'}
+                </button>
+
+                <button
+                  className={`btn btn-sm ${connStatus?.status === 'connected' ? 'btn-secondary' : 'btn-primary'}`}
+                  onClick={handleConnect}
+                  disabled={connLoading}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  {connLoading ? '...' : (
+                    <>
+                      {getConnectIcon()}
+                      {getConnectLabel()}
+                    </>
+                  )}
+                </button>
+
+                {connStatus?.status === 'connected' && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleMessage}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <HiOutlineChatBubbleLeftRight size={16} />
+                    Message
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

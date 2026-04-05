@@ -8,6 +8,7 @@ export interface User {
   follower_count: number;
   following_count: number;
   post_count: number;
+  connection_count: number;
   is_following: boolean;
 }
 
@@ -80,4 +81,32 @@ export interface AuthResponse {
   username: string;
   display_name: string;
   avatar_url: string;
+}
+
+// ── Connections ────────────────────────────────────────
+export type ConnectionStatus =
+  | 'none'
+  | 'pending_sent'
+  | 'pending_received'
+  | 'connected'
+  | 'self';
+
+export interface ConnectionUserMini {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string;
+  bio: string;
+}
+
+export interface Connection {
+  connection_id: string;
+  user: ConnectionUserMini;
+  status: 'accepted' | 'pending_sent' | 'pending_received';
+  created_at: string;
+}
+
+export interface ConnectionStatusResponse {
+  status: ConnectionStatus;
+  connection_id: string | null;
 }

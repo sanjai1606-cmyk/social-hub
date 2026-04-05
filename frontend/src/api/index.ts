@@ -6,9 +6,7 @@ const API_BASE_URL = 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
 // Attach JWT token to every request
@@ -20,12 +18,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 errors
+// Handle 401 / 403 auth failures
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    if (status === 401 || status === 403) {
       useAuthStore.getState().logout();
+      supabase.auth.signOut().catch(() => {});
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -93,25 +93,27 @@ export const notificationsAPI = {
   getUnreadCount: () => api.get('/notifications/unread-count'),
 };
 
-// ── Media Upload (direct to Supabase Storage) ─────────────────
-export const mediaAPI = {
-  /**
-   * Uploads a file directly to Supabase Storage bucket 'post-media'.
-   * Requires the Supabase JS client to have a valid session (set after login).
-   * Returns the public URL of the uploaded file.
-   */
-  uploadPostMedia: async (file: File, userId: string): Promise<string> => {
-    const ext = file.name.split('.').pop() ?? 'bin';
-    const path = `${userId}/${Date.now()}.${ext}`;
+// ── Connections ────────────────────────────
+export const connectionsAPI = {
+  getStatus: (userId: string) => api.get(`/connections/status/${userId}`),
+  sendRequest: (userId: string) => api.post(`/connections/request/${userId}`),
+  accept: (userId: string) => api.post(`/connections/accept/${userId}`),
+  reject: (userId: string) => api.post(`/connections/reject/${userId}`),
+  remove: (userId: string) => api.delete(`/connections/${userId}`),
+  getMyConnections: () => api.get('/connections'),
+  getReceivedRequests: () => api.get('/connections/requests/received'),
+  getSentRequests: () => api.get('/connections/requests/sent'),
+};
 
-    const { error } = await supabase.storage
-      .from('post-media')
-      .upload(path, file, { upsert: false });
-
-    if (error) throw new Error(error.message);
-
-    const { data } = supabase.storage.from('post-media').getPublicUrl(path);
-    return data.publicUrl;
+// ── Media Upload (via backend — uses service role, always works) ─────────
+export const uploadsAPI = {
+  uploadMedia: async (file: File): Promise<{ url: string; media_type: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await api.post('/uploads/media', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
   },
 };
 

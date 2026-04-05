@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Post } from '../types';
-import { socialAPI } from '../api';
+import { socialAPI, postsAPI } from '../api';
 import { useAuthStore } from '../store/authStore';
 import { useNavigate } from 'react-router-dom';
 import { HiHeart, HiOutlineHeart, HiOutlineChatBubbleLeft, HiOutlineShare } from 'react-icons/hi2';
@@ -84,7 +84,6 @@ export default function PostCard({ post, onUpdate }: PostCardProps) {
             className="btn btn-ghost btn-sm"
             onClick={async () => {
               if (confirm('Delete this post?')) {
-                const { postsAPI } = await import('../api');
                 await postsAPI.deletePost(post.post_id);
                 onUpdate?.();
               }
