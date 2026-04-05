@@ -11,19 +11,23 @@ router = APIRouter(prefix="/connections", tags=["Connections"])
 
 def _get_connection(user_a: str, user_b: str) -> Optional[dict]:
     """Return the connection row between two users regardless of direction, or None."""
-    result = supabase.table("connections").select("*").or_(
-        f"and(requester_id.eq.{user_a},addressee_id.eq.{user_b}),"
-        f"and(requester_id.eq.{user_b},addressee_id.eq.{user_a})"
-    ).execute()
-    return result.data[0] if result.data else None
+    try:
+        result = supabase.table("connections").select("*").or_(
+            f"and(requester_id.eq.{user_a},addressee_id.eq.{user_b}),"
+            f"and(requester_id.eq.{user_b},addressee_id.eq.{user_a})"
+        ).execute()
+        return result.data[0] if result.data else None
+    except Exception as e:
+        print(f"Warning: Could not query connections table: {str(e)}")
+        return None
 
 
 def _build_profile(user_data: dict) -> dict:
     """Build a minimal user dict for connection responses."""
     return {
-        "user_id": user_data["user_id"],
-        "username": user_data.get("username", ""),
-        "display_name": user_data.get("display_name", ""),
+        "user_id": user_data.get("user_id", ""),
+        "username": user_data.get("username", "Unknown User"),
+        "display_name": user_data.get("display_name", "Unknown User"),
         "avatar_url": user_data.get("avatar_url", ""),
         "bio": user_data.get("bio", ""),
     }
@@ -41,7 +45,11 @@ async def get_connection_status(
     if user_id == me:
         return ConnectionStatus(status="self")
 
-    row = _get_connection(me, user_id)
+    try:
+        row = _get_connection(me, user_id)
+    except Exception:
+        return ConnectionStatus(status="none")
+
     if not row:
         return ConnectionStatus(status="none")
 
@@ -175,7 +183,9 @@ async def get_my_connections(current_user: dict = Depends(get_current_user)):
         connections = []
         for row in result.data:
             pid = row["addressee_id"] if row["requester_id"] == me else row["requester_id"]
-            u = user_map.get(pid, {})
+            u = user_map.get(pid)
+            if not u:
+                continue
             connections.append(ConnectionResponse(
                 connection_id=row["connection_id"],
                 user=_build_profile(u),
@@ -184,7 +194,8 @@ async def get_my_connections(current_user: dict = Depends(get_current_user)):
             ))
         return connections
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching connections: {str(e)}")
+        return []
 
 
 @router.get("/requests/received", response_model=List[ConnectionResponse])
@@ -206,14 +217,15 @@ async def get_received_requests(current_user: dict = Depends(get_current_user)):
         return [
             ConnectionResponse(
                 connection_id=row["connection_id"],
-                user=_build_profile(user_map.get(row["requester_id"], {})),
+                user=_build_profile(user_map[row["requester_id"]]),
                 status="pending_received",
                 created_at=row["created_at"],
             )
-            for row in result.data
+            for row in result.data if row["requester_id"] in user_map
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching received requests: {str(e)}")
+        return []
 
 
 @router.get("/requests/sent", response_model=List[ConnectionResponse])
@@ -235,11 +247,12 @@ async def get_sent_requests(current_user: dict = Depends(get_current_user)):
         return [
             ConnectionResponse(
                 connection_id=row["connection_id"],
-                user=_build_profile(user_map.get(row["addressee_id"], {})),
+                user=_build_profile(user_map[row["addressee_id"]]),
                 status="pending_sent",
                 created_at=row["created_at"],
             )
-            for row in result.data
+            for row in result.data if row["addressee_id"] in user_map
         ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching sent requests: {str(e)}")
+        return []

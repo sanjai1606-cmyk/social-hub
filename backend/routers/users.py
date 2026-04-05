@@ -13,6 +13,23 @@ async def get_current_profile(current_user: dict = Depends(get_current_user)):
     return await get_user_profile(current_user["user_id"], current_user["user_id"])
 
 
+@router.get("/all", response_model=List[UserProfile])
+async def get_all_users(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get all users except the current user (for Discover People)."""
+    try:
+        result = supabase.table("users").select("*").neq(
+            "user_id", current_user["user_id"]
+        ).order("created_at", desc=True).limit(limit).offset(offset).execute()
+
+        return [await _build_profile(u, current_user["user_id"]) for u in result.data]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/search", response_model=List[UserProfile])
 async def search_users(
     q: str = Query(min_length=1),
@@ -146,10 +163,16 @@ async def get_following(
 async def get_user_profile(user_id: str, viewer_id: str) -> UserProfile:
     """Helper to build a full user profile."""
     try:
-        result = supabase.table("users").select("*").eq("user_id", user_id).single().execute()
+        result = supabase.table("users").select("*").eq("user_id", user_id).at_most_one().execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="User not found")
         return await _build_profile(result.data, viewer_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="User not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_user_profile: {str(e)}")
+        # In case of database inconsistency, still return a 404 or 500 depending on nature
+        raise HTTPException(status_code=404, detail=f"User not found or error: {str(e)[:100]}")
 
 
 async def _build_profile(user_data: dict, viewer_id: str) -> UserProfile:
@@ -161,9 +184,15 @@ async def _build_profile(user_data: dict, viewer_id: str) -> UserProfile:
     posts = supabase.table("posts").select("post_id", count="exact").eq("user_id", uid).execute()
 
     # Connection count (accepted connections from either direction)
-    conn_as_req = supabase.table("connections").select("connection_id", count="exact").eq("requester_id", uid).eq("status", "accepted").execute()
-    conn_as_addr = supabase.table("connections").select("connection_id", count="exact").eq("addressee_id", uid).eq("status", "accepted").execute()
-    connection_count = (conn_as_req.count or 0) + (conn_as_addr.count or 0)
+    connection_count = 0
+    try:
+        conn_as_req = supabase.table("connections").select("connection_id", count="exact").eq("requester_id", uid).eq("status", "accepted").execute()
+        conn_as_addr = supabase.table("connections").select("connection_id", count="exact").eq("addressee_id", uid).eq("status", "accepted").execute()
+        connection_count = (conn_as_req.count or 0) + (conn_as_addr.count or 0)
+    except Exception as e:
+        print(f"Warning: Could not fetch connection count for user {uid}: {str(e)}")
+        # If the connections table is missing or broken, we just treat it as 0
+        pass
 
     is_following = False
     if viewer_id and viewer_id != uid:
